@@ -3,12 +3,24 @@ import makeWASocket, {
   DisconnectReason,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
-import qrcode from "qrcode-terminal";
 import chalk from "chalk";
 import handler from "./lib/handler.js";
 import config from "./config.js";
+import readline from "readline";
 
 const logger = pino({ level: "silent" });
+
+// Create readline interface for pairing code input
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+function question(prompt) {
+  return new Promise((resolve) => {
+    rl.question(prompt, resolve);
+  });
+}
 
 async function startBot() {
   try {
@@ -19,7 +31,6 @@ async function startBot() {
     const sock = makeWASocket({
       auth: state,
       logger: logger,
-      printQRInTerminal: true,
       browser: ["Ubuntu", "Chrome", "20.0.04"],
       syncFullHistory: false,
       markOnlineOnConnect: true,
@@ -30,7 +41,9 @@ async function startBot() {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        qrcode.generate(qr, { small: true });
+        console.log(chalk.yellow("📱 Scan QR code OR use pairing code below:\n"));
+        // Show QR code in terminal
+        console.log(qr);
       }
 
       if (connection === "connecting") {
@@ -40,6 +53,8 @@ async function startBot() {
       if (connection === "open") {
         console.log(chalk.green("✅ Bot Connected Successfully!"));
         console.log(chalk.blue(`Developer: ${config.developer}`));
+        console.log(chalk.blue(`Bot Name: ${config.botName}`));
+        rl.close();
       }
 
       if (connection === "close") {
@@ -55,8 +70,17 @@ async function startBot() {
           startBot();
         } else {
           console.log(chalk.yellow(`⚠️ Connection closed: ${reason}`));
-          startBot();
+          setTimeout(startBot, 5000);
         }
+      }
+    });
+
+    // Handle pairing code request
+    sock.ev.on("call", async (node) => {
+      if (node[0].tag === "offer" && node[0].attrs.type === "call") {
+        const pairingCode = await sock.requestPairingCode(node[0].attrs.from);
+        console.log(chalk.green("\n📲 PAIRING CODE:"), chalk.yellow.bold(pairingCode));
+        console.log(chalk.cyan("Use this code to pair on your phone!\n"));
       }
     });
 
