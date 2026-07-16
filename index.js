@@ -1,0 +1,75 @@
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+} from "@whiskeysockets/baileys";
+import pino from "pino";
+import qrcode from "qrcode-terminal";
+import chalk from "chalk";
+import handler from "./lib/handler.js";
+import config from "./config.js";
+
+const logger = pino({ level: "silent" });
+
+async function startBot() {
+  try {
+    console.log(chalk.cyan("⚡ ZEPHYR WhatsApp Bot Starting..."));
+
+    const { state, saveCreds } = await useMultiFileAuthState("./session");
+
+    const sock = makeWASocket({
+      auth: state,
+      logger: logger,
+      printQRInTerminal: true,
+      browser: ["Ubuntu", "Chrome", "20.0.04"],
+      syncFullHistory: false,
+      markOnlineOnConnect: true,
+      retryRequestDelayMs: 10,
+    });
+
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        qrcode.generate(qr, { small: true });
+      }
+
+      if (connection === "connecting") {
+        console.log(chalk.yellow("🔄 Connecting..."));
+      }
+
+      if (connection === "open") {
+        console.log(chalk.green("✅ Bot Connected Successfully!"));
+        console.log(chalk.blue(`Developer: ${config.developer}`));
+      }
+
+      if (connection === "close") {
+        let reason = new Error(
+          lastDisconnect?.error?.output?.statusCode
+        )?.message;
+
+        if (lastDisconnect?.error?.output?.statusCode === DisconnectReason.loggedOut) {
+          console.log(chalk.red("❌ Device logged out. Delete session folder to restart."));
+          process.exit();
+        } else if (lastDisconnect?.error?.output?.statusCode === DisconnectReason.restartRequired) {
+          console.log(chalk.yellow("🔄 Restart required..."));
+          startBot();
+        } else {
+          console.log(chalk.yellow(`⚠️ Connection closed: ${reason}`));
+          startBot();
+        }
+      }
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("messages.upsert", async (m) => {
+      await handler(sock, m, config);
+    });
+
+  } catch (error) {
+    console.log(chalk.red("❌ Error:", error));
+    setTimeout(startBot, 10000);
+  }
+}
+
+startBot();
