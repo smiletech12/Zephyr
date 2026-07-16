@@ -1,0 +1,9 @@
+{
+  "users": [],
+  "groups": [],
+  "settings": {
+    "prefix": ".",
+    "autoRead": true,
+    "autoStatus": true
+  }
+}
