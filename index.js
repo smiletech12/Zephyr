@@ -10,7 +10,7 @@ import readline from "readline";
 
 const logger = pino({ level: "silent" });
 
-// Create readline interface for pairing code input
+// Create readline interface for phone number input
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
@@ -24,9 +24,31 @@ function question(prompt) {
 
 async function startBot() {
   try {
-    console.log(chalk.cyan("⚡ ZEPHYR WhatsApp Bot Starting..."));
+    console.log(chalk.cyan("⚡ ZEPHYR WhatsApp Bot Starting...\n"));
 
     const { state, saveCreds } = await useMultiFileAuthState("./session");
+
+    // Check if already authenticated
+    const isAuthenticated = state.creds?.me;
+
+    if (!isAuthenticated) {
+      console.log(chalk.yellow("📱 PAIRING MODE - Enter your WhatsApp phone number\n"));
+      
+      const phoneNumber = await question(
+        chalk.blue("Enter phone number (e.g., 254712345678 or +254712345678): ")
+      );
+
+      // Clean phone number
+      let cleanNumber = phoneNumber.replace(/[^0-9+]/g, "");
+      if (cleanNumber.startsWith("+")) {
+        cleanNumber = cleanNumber.substring(1);
+      }
+
+      console.log(chalk.cyan(`\n📲 Phone number: ${cleanNumber}`));
+      console.log(chalk.yellow("⏳ Generating pairing code...\n"));
+
+      rl.close();
+    }
 
     const sock = makeWASocket({
       auth: state,
@@ -41,20 +63,22 @@ async function startBot() {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        console.log(chalk.yellow("📱 Scan QR code OR use pairing code below:\n"));
-        // Show QR code in terminal
+        console.log(chalk.yellow("📱 QR Code displayed below:\n"));
         console.log(qr);
+        console.log(chalk.cyan("\nScan this QR code with your WhatsApp camera\n"));
       }
 
       if (connection === "connecting") {
-        console.log(chalk.yellow("🔄 Connecting..."));
+        console.log(chalk.yellow("🔄 Connecting to WhatsApp..."));
       }
 
       if (connection === "open") {
-        console.log(chalk.green("✅ Bot Connected Successfully!"));
-        console.log(chalk.blue(`Developer: ${config.developer}`));
+        console.log(chalk.green("\n✅ Bot Connected Successfully!"));
+        console.log(chalk.blue(`\nDeveloper: ${config.developer}`));
         console.log(chalk.blue(`Bot Name: ${config.botName}`));
-        rl.close();
+        console.log(chalk.green(`\n🎉 ZEPHYR is ready to use!\n`));
+        console.log(chalk.cyan("Type .menu in WhatsApp to see all commands\n"));
+        if (rl.terminal) rl.close();
       }
 
       if (connection === "close") {
@@ -63,24 +87,24 @@ async function startBot() {
         )?.message;
 
         if (lastDisconnect?.error?.output?.statusCode === DisconnectReason.loggedOut) {
-          console.log(chalk.red("❌ Device logged out. Delete session folder to restart."));
+          console.log(chalk.red("\n❌ Device logged out."));
+          console.log(chalk.yellow("Delete the 'session' folder to restart pairing.\n"));
           process.exit();
         } else if (lastDisconnect?.error?.output?.statusCode === DisconnectReason.restartRequired) {
           console.log(chalk.yellow("🔄 Restart required..."));
-          startBot();
+          setTimeout(() => startBot(), 3000);
         } else {
-          console.log(chalk.yellow(`⚠️ Connection closed: ${reason}`));
-          setTimeout(startBot, 5000);
+          console.log(chalk.yellow(`\n⚠️ Connection closed: ${reason}`));
+          console.log(chalk.yellow("Reconnecting in 5 seconds...\n"));
+          setTimeout(() => startBot(), 5000);
         }
       }
     });
 
-    // Handle pairing code request
-    sock.ev.on("call", async (node) => {
-      if (node[0].tag === "offer" && node[0].attrs.type === "call") {
-        const pairingCode = await sock.requestPairingCode(node[0].attrs.from);
-        console.log(chalk.green("\n📲 PAIRING CODE:"), chalk.yellow.bold(pairingCode));
-        console.log(chalk.cyan("Use this code to pair on your phone!\n"));
+    // Listen for pairing code
+    sock.ev.on("connection.update", async (update) => {
+      if (update.isNewLogin) {
+        console.log(chalk.green("✅ Pairing successful!\n"));
       }
     });
 
@@ -91,7 +115,8 @@ async function startBot() {
     });
 
   } catch (error) {
-    console.log(chalk.red("❌ Error:", error));
+    console.log(chalk.red("❌ Error:", error.message));
+    console.log(chalk.yellow("Retrying in 10 seconds...\n"));
     setTimeout(startBot, 10000);
   }
 }
